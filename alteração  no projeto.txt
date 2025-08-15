@@ -1,0 +1,8 @@
+alteração  no projeto
+
+integração mercado pago
+melhoria no front-end
+criação da tabela de prêmios no banco de dados
+login leva para homepage do site com os jogos
+criação da admin-dashboard
+
