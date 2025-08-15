@@ -415,6 +415,102 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
+// ==================== RELATÓRIOS (CORRIGIDO) ====================
+
+exports.getDashboardStats = async (req, res) => {
+  try {
+    console.log('📊 Buscando estatísticas do dashboard...');
+    
+    // Buscar cada estatística separadamente para identificar onde está o erro
+    let totalStats = null;
+    let recentWinners = [];
+    let popularGames = [];
+    let totalUsers = 0;
+
+    // 1. Estatísticas totais
+    try {
+      totalStats = await UserPlay.getTotalStats();
+      console.log('✅ Estatísticas totais obtidas:', totalStats);
+    } catch (error) {
+      console.error('❌ Erro ao buscar estatísticas totais:', error);
+      totalStats = {
+        total_games_played: 0,
+        total_players: 0,
+        total_bets: 0,
+        total_prizes: 0,
+        total_wins: 0,
+        avg_bet_amount: 0
+      };
+    }
+
+    // 2. Ganhadores recentes
+    try {
+      recentWinners = await UserPlay.getRecentWinners(5);
+      console.log('✅ Ganhadores recentes obtidos:', recentWinners.length);
+    } catch (error) {
+      console.error('❌ Erro ao buscar ganhadores recentes:', error);
+      recentWinners = [];
+    }
+
+    // 3. Jogos populares
+    try {
+      popularGames = await Game.getPopularGames(5);
+      console.log('✅ Jogos populares obtidos:', popularGames.length);
+    } catch (error) {
+      console.error('❌ Erro ao buscar jogos populares:', error);
+      popularGames = [];
+    }
+
+    // 4. Total de usuários
+    try {
+      const { rows: userCount } = await require('../config/database').query(
+        'SELECT COUNT(*) as total FROM users WHERE role = ?',
+        ['player']
+      );
+      totalUsers = userCount[0]?.total || 0;
+      console.log('✅ Total de usuários obtido:', totalUsers);
+    } catch (error) {
+      console.error('❌ Erro ao buscar total de usuários:', error);
+      totalUsers = 0;
+    }
+
+    // 5. Relatório de receita (opcional)
+    let revenueReport = [];
+    try {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      revenueReport = await Transaction.getRevenueReport(
+        thirtyDaysAgo.toISOString().split('T')[0],
+        new Date().toISOString().split('T')[0]
+      );
+      console.log('✅ Relatório de receita obtido:', revenueReport.length);
+    } catch (error) {
+      console.error('❌ Erro ao buscar relatório de receita:', error);
+      revenueReport = [];
+    }
+
+    // Resposta consolidada
+    const response = {
+      totalStats,
+      recentWinners,
+      popularGames,
+      totalUsers,
+      revenueReport
+    };
+
+    console.log('✅ Estatísticas do dashboard enviadas com sucesso');
+    res.json(response);
+
+  } catch (error) {
+    console.error('❌ Erro geral ao buscar estatísticas do dashboard:', error);
+    res.status(500).json({ 
+      message: 'Erro ao buscar estatísticas.',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro interno'
+    });
+  }
+};
+
 exports.getRevenueReport = async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -423,9 +519,32 @@ exports.getRevenueReport = async (req, res) => {
       return res.status(400).json({ message: 'Data de início e fim são obrigatórias.' });
     }
 
-    const revenueReport = await Transaction.getRevenueReport(startDate, endDate);
-    const transactionSummary = await Transaction.getTransactionSummary(startDate, endDate);
-    const playsByDate = await UserPlay.getPlaysByDateRange(startDate, endDate);
+    console.log('📊 Gerando relatório de receita...', { startDate, endDate });
+
+    let revenueReport = [];
+    let transactionSummary = [];
+    let playsByDate = [];
+
+    try {
+      revenueReport = await Transaction.getRevenueReport(startDate, endDate);
+    } catch (error) {
+      console.error('Erro no relatório de receita:', error);
+      revenueReport = [];
+    }
+
+    try {
+      transactionSummary = await Transaction.getTransactionSummary(startDate, endDate);
+    } catch (error) {
+      console.error('Erro no resumo de transações:', error);
+      transactionSummary = [];
+    }
+
+    try {
+      playsByDate = await UserPlay.getPlaysByDateRange(startDate, endDate);
+    } catch (error) {
+      console.error('Erro nas jogadas por data:', error);
+      playsByDate = [];
+    }
 
     res.json({
       revenueReport,
@@ -433,13 +552,15 @@ exports.getRevenueReport = async (req, res) => {
       playsByDate
     });
   } catch (error) {
-    console.error('Erro ao gerar relatório de receita:', error);
+    console.error('❌ Erro ao gerar relatório de receita:', error);
     res.status(500).json({ message: 'Erro ao gerar relatório de receita.' });
   }
 };
 
 exports.getGamePerformanceReport = async (req, res) => {
   try {
+    console.log('📊 Gerando relatório de performance dos jogos...');
+    
     const { rows: gamePerformance } = await require('../config/database').query(`
       SELECT 
         g.id,
@@ -449,22 +570,23 @@ exports.getGamePerformanceReport = async (req, res) => {
         g.rtp,
         COUNT(up.id) as total_plays,
         COUNT(DISTINCT up.user_id) as unique_players,
-        SUM(up.amount_bet) as total_revenue,
-        SUM(up.prize_won) as total_prizes_paid,
-        ROUND((SUM(up.prize_won) / NULLIF(SUM(up.amount_bet), 0)) * 100, 2) as actual_rtp,
-        ROUND((COUNT(CASE WHEN up.is_winner THEN 1 END)::numeric / NULLIF(COUNT(up.id), 0)) * 100, 2) as win_rate,
-        AVG(up.amount_bet) as avg_bet,
-        MAX(up.prize_won) as biggest_win,
+        COALESCE(SUM(up.amount_bet), 0) as total_revenue,
+        COALESCE(SUM(up.prize_won), 0) as total_prizes_paid,
+        ROUND((COALESCE(SUM(up.prize_won), 0) / NULLIF(COALESCE(SUM(up.amount_bet), 0), 0)) * 100, 2) as actual_rtp,
+        ROUND((COUNT(CASE WHEN up.is_winner = 1 THEN 1 END) / NULLIF(COUNT(up.id), 0)) * 100, 2) as win_rate,
+        COALESCE(AVG(up.amount_bet), 0) as avg_bet,
+        COALESCE(MAX(up.prize_won), 0) as biggest_win,
         MAX(up.played_at) as last_played
       FROM games g
       LEFT JOIN user_plays up ON g.id = up.game_id
       GROUP BY g.id, g.name, g.price, g.theme, g.rtp
-      ORDER BY total_revenue DESC NULLS LAST
+      ORDER BY total_revenue DESC
     `);
 
+    console.log('✅ Relatório de performance gerado:', gamePerformance.length, 'jogos');
     res.json(gamePerformance);
   } catch (error) {
-    console.error('Erro ao gerar relatório de performance dos jogos:', error);
+    console.error('❌ Erro ao gerar relatório de performance dos jogos:', error);
     res.status(500).json({ message: 'Erro ao gerar relatório de performance dos jogos.' });
   }
 };

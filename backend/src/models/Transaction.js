@@ -1,25 +1,35 @@
-// Arquivo: backend/src/models/Transaction.js
+// Arquivo: backend/src/models/Transaction.js (CORRIGIDO PARA MYSQL)
 
 const db = require('../config/database');
 
 const create = async ({ userId, type, amount, status = 'pending', paymentMethod, externalReference, description }) => {
   const { rows } = await db.query(
     `INSERT INTO transactions (user_id, type, amount, status, payment_method, external_reference, description) 
-     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [userId, type, amount, status, paymentMethod, externalReference, description]
   );
-  return rows[0];
+  
+  // MySQL retorna insertId
+  const insertId = rows.insertId;
+  
+  // Buscar o registro inserido
+  const { rows: inserted } = await db.query(
+    'SELECT * FROM transactions WHERE id = ?',
+    [insertId]
+  );
+  
+  return inserted[0];
 };
 
 const findById = async (id) => {
-  const { rows } = await db.query('SELECT * FROM transactions WHERE id = $1', [id]);
+  const { rows } = await db.query('SELECT * FROM transactions WHERE id = ?', [id]);
   return rows[0];
 };
 
 const findByUserId = async (userId, limit = 50, offset = 0) => {
   const { rows } = await db.query(
-    'SELECT * FROM transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
-    [userId, limit, offset]
+    'SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+    [userId, parseInt(limit), parseInt(offset)]
   );
   return rows;
 };
@@ -31,22 +41,22 @@ const findAll = async (limit = 100, offset = 0, filters = {}) => {
 
   // Aplicar filtros
   if (filters.type) {
-    whereConditions.push(`t.type = $${params.length + 1}`);
+    whereConditions.push(`t.type = ?`);
     params.push(filters.type);
   }
 
   if (filters.status) {
-    whereConditions.push(`t.status = $${params.length + 1}`);
+    whereConditions.push(`t.status = ?`);
     params.push(filters.status);
   }
 
   if (filters.startDate) {
-    whereConditions.push(`t.created_at >= $${params.length + 1}`);
+    whereConditions.push(`t.created_at >= ?`);
     params.push(filters.startDate);
   }
 
   if (filters.endDate) {
-    whereConditions.push(`t.created_at <= $${params.length + 1}`);
+    whereConditions.push(`t.created_at <= ?`);
     params.push(filters.endDate);
   }
 
@@ -54,8 +64,8 @@ const findAll = async (limit = 100, offset = 0, filters = {}) => {
     query += ' WHERE ' + whereConditions.join(' AND ');
   }
 
-  query += ` ORDER BY t.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-  params.push(limit, offset);
+  query += ` ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
+  params.push(parseInt(limit), parseInt(offset));
 
   const { rows } = await db.query(query, params);
   return rows;
@@ -63,10 +73,12 @@ const findAll = async (limit = 100, offset = 0, filters = {}) => {
 
 const updateStatus = async (id, status, externalReference = null) => {
   const { rows } = await db.query(
-    'UPDATE transactions SET status = $1, external_reference = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *',
+    'UPDATE transactions SET status = ?, external_reference = ?, updated_at = NOW() WHERE id = ?',
     [status, externalReference, id]
   );
-  return rows[0];
+  
+  // Buscar o registro atualizado
+  return await findById(id);
 };
 
 const getPendingWithdrawals = async () => {
@@ -82,36 +94,46 @@ const getPendingWithdrawals = async () => {
 
 // Relatórios
 const getTransactionSummary = async (startDate, endDate) => {
-  const { rows } = await db.query(
-    `SELECT 
-       type,
-       status,
-       COUNT(*) as count,
-       SUM(amount) as total_amount
-     FROM transactions 
-     WHERE created_at BETWEEN $1 AND $2
-     GROUP BY type, status
-     ORDER BY type, status`,
-    [startDate, endDate]
-  );
-  return rows;
+  try {
+    const { rows } = await db.query(
+      `SELECT 
+         type,
+         status,
+         COUNT(*) as count,
+         COALESCE(SUM(amount), 0) as total_amount
+       FROM transactions 
+       WHERE created_at BETWEEN ? AND ?
+       GROUP BY type, status
+       ORDER BY type, status`,
+      [startDate, endDate]
+    );
+    return rows;
+  } catch (error) {
+    console.error('Erro ao buscar resumo de transações:', error);
+    return [];
+  }
 };
 
 const getRevenueReport = async (startDate, endDate) => {
-  const { rows } = await db.query(
-    `SELECT 
-       DATE(created_at) as date,
-       SUM(CASE WHEN type = 'deposit' AND status = 'completed' THEN amount ELSE 0 END) as deposits,
-       SUM(CASE WHEN type = 'withdrawal' AND status = 'completed' THEN amount ELSE 0 END) as withdrawals,
-       SUM(CASE WHEN type = 'game_cost' THEN amount ELSE 0 END) as game_revenue,
-       SUM(CASE WHEN type = 'prize' THEN amount ELSE 0 END) as prizes_paid
-     FROM transactions 
-     WHERE created_at BETWEEN $1 AND $2
-     GROUP BY DATE(created_at)
-     ORDER BY date DESC`,
-    [startDate, endDate]
-  );
-  return rows;
+  try {
+    const { rows } = await db.query(
+      `SELECT 
+         DATE(created_at) as date,
+         COALESCE(SUM(CASE WHEN type = 'deposit' AND status = 'completed' THEN amount ELSE 0 END), 0) as deposits,
+         COALESCE(SUM(CASE WHEN type = 'withdrawal' AND status = 'completed' THEN amount ELSE 0 END), 0) as withdrawals,
+         COALESCE(SUM(CASE WHEN type = 'game_cost' THEN amount ELSE 0 END), 0) as game_revenue,
+         COALESCE(SUM(CASE WHEN type = 'prize' THEN amount ELSE 0 END), 0) as prizes_paid
+       FROM transactions 
+       WHERE created_at BETWEEN ? AND ?
+       GROUP BY DATE(created_at)
+       ORDER BY date DESC`,
+      [startDate, endDate]
+    );
+    return rows;
+  } catch (error) {
+    console.error('Erro ao buscar relatório de receita:', error);
+    return [];
+  }
 };
 
 module.exports = {

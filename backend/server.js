@@ -1,12 +1,13 @@
-// Arquivo: backend/server.js (ATUALIZADO)
+// Arquivo: backend/server.js
 
 const express = require('express');
-const cors = require('cors');
+const cors = require('cors'); // 1. Importe o pacote cors
 require('dotenv').config();
 
+// Importa a função de inicialização da base de dados
 const { initializeDatabase } = require('./src/config/database');
 
-// Importar todas as rotas
+// Importe os seus ficheiros de rotas
 const authRoutes = require('./src/routes/authRoutes');
 const userRoutes = require('./src/routes/userRoutes');
 const gameRoutes = require('./src/routes/gameRoutes');
@@ -14,74 +15,53 @@ const adminRoutes = require('./src/routes/adminRoutes');
 
 const app = express();
 
-// Middlewares
-app.use(cors());
+// =================================================================
+// 2. APLIQUE O MIDDLEWARE DE CORS AQUI (O PASSO MAIS IMPORTANTE)
+// Configuração explícita para permitir requisições do seu frontend
+const corsOptions = {
+  origin: 'http://localhost:3000', // Endereço do seu frontend React
+  optionsSuccessStatus: 200
+};
+app.use(cors(corsOptions));
+// =================================================================
+
+// Middlewares para processar JSON
 app.use(express.json());
 
-// Middleware para log de requisições (desenvolvimento)
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  next();
-});
-
-// Rota de health check
+// Rota de teste
 app.get('/', (req, res) => {
-  res.json({
-    message: 'API da Raspadinha iGame está no ar! 🎮',
-    version: '1.0.0',
-    timestamp: new Date().toISOString()
-  });
+  res.send('API da Raspadinha iGame está no ar!');
 });
 
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
-
-// Configurar todas as rotas
+// Registe as suas rotas
 app.use('/api/auth', authRoutes);
-app.use('/api/user', userRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/games', gameRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Middleware para rotas não encontradas
-app.use('*', (req, res) => {
-  res.status(404).json({
-    message: 'Rota não encontrada',
-    path: req.originalUrl
-  });
+// Middleware para tratamento de rotas não encontradas (404)
+app.use((req, res, next) => {
+  res.status(404).send("Desculpe, a rota que você procura não foi encontrada.");
 });
 
-// Middleware global de tratamento de erros
-app.use((error, req, res, next) => {
-  console.error('Erro não tratado:', error);
-  res.status(500).json({
-    message: 'Erro interno do servidor',
-    error: process.env.NODE_ENV === 'development' ? error.message : undefined
-  });
+// Middleware para tratamento de erros global
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send('Algo correu mal no servidor!');
 });
 
-const PORT = process.env.PORT || 3001;
 
+const PORT = process.env.PORT || 8000; // A porta do backend
+
+// Inicia o servidor e a base de dados
 app.listen(PORT, async () => {
-  console.log(`\n🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`📍 URL: http://localhost:${PORT}`);
-  console.log(`📋 Health check: http://localhost:${PORT}/health`);
-  console.log('\n📊 Rotas disponíveis:');
-  console.log('   • Auth: /api/auth/*');
-  console.log('   • Usuário: /api/user/*');
-  console.log('   • Jogos: /api/games/*');
-  console.log('   • Admin: /api/admin/*');
-  console.log('\n🔧 Inicializando banco de dados...');
-  
+  console.log(`🚀 Servidor a correr na porta ${PORT}`);
   try {
+    // Chama a função de inicialização da base de dados
     await initializeDatabase();
-    console.log('✅ Banco de dados inicializado com sucesso!');
-    console.log('\n🎯 API pronta para uso!');
+    console.log('✅ Base de dados inicializada com sucesso!');
   } catch (error) {
-    console.error('❌ Erro ao inicializar banco de dados:', error);
+    console.error('❌ Falha ao inicializar a base de dados:', error);
+    process.exit(1); // Encerra a aplicação se a base de dados falhar
   }
 });

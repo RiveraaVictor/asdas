@@ -1,4 +1,4 @@
-// Arquivo: backend/src/models/Game.js (ATUALIZADO)
+// Arquivo: backend/src/models/Game.js (VERSÃO FINAL CORRIGIDA)
 const db = require('../config/database');
 
 const findAll = async (includeInactive = false) => {
@@ -52,27 +52,84 @@ const toggleActive = async (id) => {
 const getGameWithPrizes = async (id) => {
   const game = await findById(id);
   if (!game) return null;
-
+  
   const { rows: prizes } = await db.query(
     'SELECT * FROM prizes WHERE game_id = $1 ORDER BY probability DESC',
     [id]
   );
-
+  
   return { ...game, prizes };
 };
 
 const getPopularGames = async (limit = 5) => {
-  const { rows } = await db.query(
-    `SELECT g.*, COUNT(up.id) as play_count, SUM(up.amount_bet) as total_revenue
-     FROM games g
-     LEFT JOIN user_plays up ON g.id = up.game_id
-     WHERE g.is_active = true
-     GROUP BY g.id
-     ORDER BY play_count DESC, total_revenue DESC
-     LIMIT $1`,
-    [limit]
-  );
-  return rows;
+  try {
+    const { rows } = await db.query(
+      `SELECT g.*, 
+              COUNT(up.id) as play_count, 
+              COALESCE(SUM(up.amount_bet), 0) as total_revenue
+       FROM games g
+       LEFT JOIN user_plays up ON g.id = up.game_id
+       WHERE g.is_active = true
+       GROUP BY g.id, g.name, g.price, g.theme, g.description, g.rtp, g.is_active, g.created_at, g.updated_at
+       ORDER BY play_count DESC, total_revenue DESC
+       LIMIT $1`,
+      [parseInt(limit)]
+    );
+    return rows;
+  } catch (error) {
+    console.error('Erro ao buscar jogos populares:', error);
+    return [];
+  }
+};
+
+// Função adicional para obter estatísticas detalhadas de um jogo
+const getGameStats = async (id) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT g.*,
+              COUNT(up.id) as total_plays,
+              COALESCE(SUM(up.amount_bet), 0) as total_revenue,
+              COALESCE(AVG(up.amount_bet), 0) as avg_bet,
+              COUNT(DISTINCT up.user_id) as unique_players
+       FROM games g
+       LEFT JOIN user_plays up ON g.id = up.game_id
+       WHERE g.id = $1
+       GROUP BY g.id, g.name, g.price, g.theme, g.description, g.rtp, g.is_active, g.created_at, g.updated_at`,
+      [id]
+    );
+    return rows[0] || null;
+  } catch (error) {
+    console.error('Erro ao buscar estatísticas do jogo:', error);
+    return null;
+  }
+};
+
+// Função para obter jogos por tema
+const findByTheme = async (theme) => {
+  try {
+    const { rows } = await db.query(
+      'SELECT * FROM games WHERE theme = $1 AND is_active = true ORDER BY created_at DESC',
+      [theme]
+    );
+    return rows;
+  } catch (error) {
+    console.error('Erro ao buscar jogos por tema:', error);
+    return [];
+  }
+};
+
+// Função para obter jogos na faixa de preço
+const findByPriceRange = async (minPrice, maxPrice) => {
+  try {
+    const { rows } = await db.query(
+      'SELECT * FROM games WHERE price BETWEEN $1 AND $2 AND is_active = true ORDER BY price ASC',
+      [minPrice, maxPrice]
+    );
+    return rows;
+  } catch (error) {
+    console.error('Erro ao buscar jogos por faixa de preço:', error);
+    return [];
+  }
 };
 
 module.exports = {
@@ -83,5 +140,8 @@ module.exports = {
   deleteById,
   toggleActive,
   getGameWithPrizes,
-  getPopularGames
+  getPopularGames,
+  getGameStats,
+  findByTheme,
+  findByPriceRange
 };

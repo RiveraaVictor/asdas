@@ -94,7 +94,7 @@ exports.login = async (req, res) => {
     );
 
     // Atualiza último login (opcional)
-    await query('UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
+    await query('UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
 
     res.status(200).json({
       message: 'Login bem-sucedido!',

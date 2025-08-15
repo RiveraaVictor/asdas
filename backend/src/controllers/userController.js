@@ -1,5 +1,3 @@
-// Arquivo: backend/src/controllers/userController.js (ATUALIZADO)
-
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const UserPlay = require('../models/UserPlay');
