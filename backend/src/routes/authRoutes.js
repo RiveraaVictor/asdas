@@ -1,11 +1,18 @@
-// Arquivo: backend/src/routes/authRoutes.js
+// Arquivo: backend/src/routes/authRoutes.js (ATUALIZADO)
 
 const express = require('express');
 const router = express.Router();
-const userController = require('../controllers/userController');
+const authController = require('../controllers/authController');
+const authMiddleware = require('../middlewares/authMiddleware');
 
-router.post('/register', userController.register);
+// Rotas públicas
+router.post('/register', authController.register);
+router.post('/login', authController.login);
+router.post('/forgot-password', authController.forgotPassword);
+router.post('/reset-password', authController.resetPassword);
 
-router.post('/login', userController.login);
+// Rotas que precisam de autenticação
+router.post('/refresh-token', authMiddleware, authController.refreshToken);
+router.get('/validate', authMiddleware, authController.validateToken);
 
 module.exports = router;

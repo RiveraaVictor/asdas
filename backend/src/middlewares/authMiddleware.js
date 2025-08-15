@@ -1,5 +1,3 @@
-// Arquivo: backend/src/middlewares/authMiddleware.js
-
 const jwt = require('jsonwebtoken');
 
 module.exports = function (req, res, next) {
@@ -29,3 +27,4 @@ module.exports = function (req, res, next) {
     res.status(400).json({ message: 'Token inválido.' });
   }
 };
+
